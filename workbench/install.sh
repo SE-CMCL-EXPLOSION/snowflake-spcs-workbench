@@ -7,6 +7,7 @@
 #   ./install.sh                     # uses config.env
 #   ./install.sh my-config.env       # another settings file
 #   ./install.sh --skip-images       # re-apply SQL + portal without rebuilding images
+#   ./install.sh --connection NAME   # use this Snowflake CLI connection (overrides config.env)
 #
 # Safe to re-run: existing objects are kept, data is never deleted.
 # Needs: Snowflake CLI (snow), Docker (running), a connection whose user can use ACCOUNTADMIN.
@@ -16,12 +17,16 @@ cd "$(dirname "$0")"
 
 CONFIG=config.env
 SKIP_IMAGES=0
-for a in "$@"; do
-  case "$a" in
+CONNECTION_ARG=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --skip-images) SKIP_IMAGES=1 ;;
-    -h|--help) sed -n 2,13p "$0"; exit 0 ;;
-    *) CONFIG=$a ;;
+    --connection|-c) [[ -n "${2:-}" ]] || { echo "--connection needs a name" >&2; exit 1; }; CONNECTION_ARG=$2; shift ;;
+    --connection=*) CONNECTION_ARG=${1#*=} ;;
+    -h|--help) sed -n 2,14p "$0"; exit 0 ;;
+    *) CONFIG=$1 ;;
   esac
+  shift
 done
 
 STEP=0
@@ -37,6 +42,7 @@ step "Reading settings from $CONFIG"
 [[ -f "$CONFIG" ]] || fail "Settings file '$CONFIG' not found."
 # shellcheck disable=SC1090
 source "$CONFIG"
+[[ -n "$CONNECTION_ARG" ]] && SNOW_CONNECTION=$CONNECTION_ARG
 for v in SNOW_CONNECTION APP_DATABASE WAREHOUSE OBJECT_PREFIX OWNER_ROLE ACCESS_ROLE_PREFIX \
          SESSION_POOL_FAMILY SESSION_POOL_MAX_NODES IMAGE_TAG; do
   [[ -n "${!v:-}" ]] || fail "$v is empty in $CONFIG"

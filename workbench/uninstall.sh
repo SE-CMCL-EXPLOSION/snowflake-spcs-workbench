@@ -5,22 +5,29 @@
 #   ./uninstall.sh --purge          # also delete schema WORKBENCH (user files, audit log, settings)
 #                                     and schema SPCS (images)
 #   ./uninstall.sh my-config.env [--purge]
+#   ./uninstall.sh --connection NAME  # use this Snowflake CLI connection (overrides config.env)
 # The warehouse, APP_DATABASE itself and your data databases are never dropped.
 # =============================================================================
 set -uo pipefail
 cd "$(dirname "$0")"
 CONFIG=config.env
 PURGE=0
-for a in "$@"; do
-  case "$a" in
+CONNECTION_ARG=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --purge) PURGE=1 ;;
-    -h|--help) sed -n 2,9p "$0"; exit 0 ;;
-    *) CONFIG=$a ;;
+    --connection|-c) [[ -n "${2:-}" ]] || { echo "--connection needs a name" >&2; exit 1; }; CONNECTION_ARG=$2; shift ;;
+    --connection=*) CONNECTION_ARG=${1#*=} ;;
+    -h|--help) sed -n 2,10p "$0"; exit 0 ;;
+    *) CONFIG=$1 ;;
   esac
+  shift
 done
 [[ -f "$CONFIG" ]] || { echo "Settings file '$CONFIG' not found." >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$CONFIG"
+[[ -n "$CONNECTION_ARG" ]] && SNOW_CONNECTION=$CONNECTION_ARG
+[[ -n "${SNOW_CONNECTION:-}" ]] || { echo "SNOW_CONNECTION is empty in $CONFIG (or pass --connection NAME)" >&2; exit 1; }
 upper() { echo "$1" | tr '[:lower:]' '[:upper:]'; }
 APP_DATABASE=$(upper "$APP_DATABASE"); OBJECT_PREFIX=$(upper "$OBJECT_PREFIX")
 OWNER_ROLE=$(upper "$OWNER_ROLE"); ACCESS_ROLE_PREFIX=$(upper "$ACCESS_ROLE_PREFIX")

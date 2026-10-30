@@ -56,27 +56,32 @@ There are no servers, VMs or Kubernetes clusters to run, and no database passwor
 
 ## How it works
 
-```
-                        Your Snowflake account
- ┌──────────────────────────────────────────────────────────────────────┐
- │                                                                      │
- │  Portal service  (1 small always-on node)                            │
- │    sign-in · start/stop sessions · Admin · Packages                  │
- │    curated R + Python package repository  ◄── approved downloads     │
- │                   │                            (portal egress only)  │
- │                   │ private endpoint                                 │
- │                   ▼                                                  │
- │  Session services (one per user session, autoscaling pool)           │
- │    RStudio or JupyterLab                                             │
- │    SQL runs AS THE SIGNED-IN USER (caller's rights)                  │
- │    ~/work persisted to a Snowflake stage                             │
- │                   │                                                  │
- │                   ▼                                                  │
- │  Your data: tables · views · stages (incl. S3 via external stages)   │
- │  Audit: every session query → permanent audit table                  │
- └──────────────────────────────────────────────────────────────────────┘
-          ▲  browser + Snowflake sign-in (SSO)
-        Users
+```mermaid
+flowchart TB
+    U([Users<br/>browser + Snowflake sign-in / SSO])
+
+    subgraph ACCT["Your Snowflake account"]
+        direction TB
+        P["<b>Portal service</b><br/>sign-in · sessions · Admin · Packages<br/>curated R + Python package repository"]
+        S["<b>Session services</b> (one per user session)<br/>RStudio or JupyterLab<br/>SQL runs as the signed-in user"]
+        D[("Your data<br/>tables · views · stages")]
+        A[("Audit log<br/>every session query")]
+        H[("User files<br/>~/work on a stage")]
+    end
+
+    EXT["CRAN · Bioconductor · PyPI"]
+    S3[("Amazon S3")]
+
+    U --> P
+    U --> S
+    P -->|starts / stops| S
+    S -->|install approved packages<br/>private endpoint| P
+    P -->|mirror approved packages only| EXT
+    S -->|caller's rights queries| D
+    S --> H
+    S -.->|query history| A
+    D -.-|external stage| S3
+    S -.-x|no direct access| EXT
 ```
 
 1. A user opens the portal and signs in with Snowflake (SSO if configured).
@@ -103,9 +108,10 @@ You need about 15 minutes of hands-on time. The first install then runs unattend
 git clone https://github.com/SE-CMCL-EXPLOSION/snowflake-spcs-workbench.git
 cd snowflake-spcs-workbench/workbench
 
-snow connection add            # connection name: default, role: ACCOUNTADMIN
-# edit config.env              # at minimum: DATA_DATABASES
-./install.sh                   # Windows: powershell -ExecutionPolicy Bypass -File .\install.ps1
+snow connection add            # any connection name; its user needs ACCOUNTADMIN
+# edit config.env              # at minimum: DATA_DATABASES (and SNOW_CONNECTION if not "default")
+./install.sh                   # or: ./install.sh --connection <name>
+                               # Windows: powershell -ExecutionPolicy Bypass -File .\install.ps1 [-Connection <name>]
 ```
 
 The installer finishes by printing the portal URL. Sign in, and you are the first admin. Then grant access under **Admin > Users** and approve packages under **Packages**.

@@ -25,7 +25,7 @@ You need about 15 minutes of hands-on time; the installer then runs on its own f
    snow connection add
    ```
    Answer the prompts:
-   - **Connection name:** `default`.
+   - **Connection name:** anything, e.g. `default` or `myaccount_admin`. If it isn't `default`, put it in `SNOW_CONNECTION` in `config.env` (step 3) or pass `--connection <name>` to the installer.
    - **Account:** your account identifier (Snowsight > your name > Account > *View account details*, e.g. `myorg-myaccount`).
    - **User:** your Snowflake user.
    - **Authenticator:** `externalbrowser` for SSO, or your password.
@@ -34,12 +34,14 @@ You need about 15 minutes of hands-on time; the installer then runs on its own f
 
    Then check it works:
    ```
-   snow connection test -c default
+   snow connection test -c <name>
    ```
 3. **Edit `config.env`** in any text editor. The three settings most installs need:
    - `DATA_DATABASES`: the databases people will analyse, e.g. `"ANALYTICS RESEARCH"`.
    - `FIRST_ADMIN`: your Snowflake user name. Leave it empty to make the user who runs the installer the admin.
    - `USER_ACCESS_ROLES`: optional. Existing roles whose members get Workbench access straight away, e.g. `"DATA_SCIENTIST"`.
+
+   - `SNOW_CONNECTION`: the connection name from step 2, if it isn't `default`.
 
    Everything else has working defaults; each line is explained in the file.
 4. **Run the installer:**
@@ -66,18 +68,19 @@ You need about 15 minutes of hands-on time; the installer then runs on its own f
 
 ### If something goes wrong
 - **The installer stops with an `ERROR`:** the message says what's wrong. Fix it and run `./install.sh` again. Re-running is always safe, and finished steps are quick.
-- **"Could not connect ... as ACCOUNTADMIN":** run `snow connection test -c default`. The user must have the ACCOUNTADMIN role.
+- **"Could not connect ... as ACCOUNTADMIN":** run `snow connection test -c <name>` with the name in `SNOW_CONNECTION` (or the one you passed with `--connection`). The user must have the ACCOUNTADMIN role.
 - **"Docker is installed but not running":** open Docker Desktop and wait until it says it's running.
 - **Upload keeps failing or is very slow:** the images total several GB.
   - Use a fast, wired network.
   - In Docker Desktop > Settings > Docker Engine, add `"max-concurrent-uploads": 1` to the JSON, then click **Apply & restart**.
   - Re-run `./install.sh`. Finished uploads are kept.
+- **Using a different connection** without editing `config.env`: `./install.sh --connection <name>` (also works for `./uninstall.sh`; Windows: `-Connection <name>`).
 - **Re-running without rebuilding images** (for example after changing `DATA_DATABASES` or `SESSION_EGRESS_HOSTS`): `./install.sh --skip-images`, or on Windows `.\install.ps1 -SkipImages`.
 - **Windows:**
   - **"snow is not recognized":** close PowerShell and open a new window after installing the Snowflake CLI, so it picks up the new PATH.
   - **Image builds fail on Windows:** Docker Desktop must use **Linux containers** (the default). Check the whale icon menu.
   - **"running scripts is disabled":** include `-ExecutionPolicy Bypass` as shown above.
-  - Every command in this README has a Windows form: swap `./install.sh` for `.\install.ps1` and `./uninstall.sh` for `.\uninstall.ps1`. Options become `-SkipImages`, `-Purge` and `-Config file.env`.
+  - Every command in this README has a Windows form: swap `./install.sh` for `.\install.ps1` and `./uninstall.sh` for `.\uninstall.ps1`. Options become `-SkipImages`, `-Purge`, `-Connection <name>` and `-Config file.env`.
 
 ### Upgrading
 Get the new version of the files, set a new `IMAGE_TAG` in `config.env` (e.g. `v2`), and run `./install.sh`. Existing sessions keep working; new sessions use the new images.

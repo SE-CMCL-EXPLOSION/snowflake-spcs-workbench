@@ -4,12 +4,14 @@
 #   powershell -ExecutionPolicy Bypass -File .\uninstall.ps1           # remove the app; KEEP user files, audit log, images
 #   powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge    # also delete schemas WORKBENCH and SPCS
 #   powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Config my-config.env
+#   powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Connection NAME   # overrides config.env
 #
 # The warehouse, APP_DATABASE itself and your data databases are never dropped.
 # =============================================================================
 param(
     [string]$Config = "config.env",
-    [switch]$Purge
+    [switch]$Purge,
+    [string]$Connection = ""
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Continue"
@@ -22,6 +24,7 @@ foreach ($line in Get-Content -LiteralPath $Config) {
     if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"') { $cfg[$Matches[1]] = $Matches[2] }
     elseif ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\s#]*)') { $cfg[$Matches[1]] = $Matches[2] }
 }
+if ($Connection) { $cfg["SNOW_CONNECTION"] = $Connection }
 function Cfg($name) { if ($cfg.ContainsKey($name)) { return $cfg[$name].Trim().ToUpper() } else { return "" } }
 $Conn = if ($cfg.ContainsKey("SNOW_CONNECTION")) { $cfg["SNOW_CONNECTION"].Trim() } else { "" }
 $Db = Cfg "APP_DATABASE"; $Prefix = Cfg "OBJECT_PREFIX"; $Owner = Cfg "OWNER_ROLE"; $Access = Cfg "ACCESS_ROLE_PREFIX"

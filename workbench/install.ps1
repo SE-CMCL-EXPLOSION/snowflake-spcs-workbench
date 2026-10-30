@@ -4,13 +4,15 @@
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Config my-config.env
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 -SkipImages
+#   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Connection NAME   # overrides config.env
 #
 # Safe to re-run: existing objects are kept, data is never deleted.
 # Needs: Snowflake CLI (snow), Docker Desktop (running), a connection whose user can use ACCOUNTADMIN.
 # =============================================================================
 param(
     [string]$Config = "config.env",
-    [switch]$SkipImages
+    [switch]$SkipImages,
+    [string]$Connection = ""
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Continue"   # native tools write progress to stderr; we check exit codes instead
@@ -57,6 +59,7 @@ foreach ($line in Get-Content -LiteralPath $Config) {
     if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"') { $cfg[$Matches[1]] = $Matches[2] }
     elseif ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\s#]*)') { $cfg[$Matches[1]] = $Matches[2] }
 }
+if ($Connection) { $cfg["SNOW_CONNECTION"] = $Connection }
 function Cfg($name) { if ($cfg.ContainsKey($name)) { return $cfg[$name].Trim() } else { return "" } }
 
 $required = "SNOW_CONNECTION","APP_DATABASE","WAREHOUSE","OBJECT_PREFIX","OWNER_ROLE","ACCESS_ROLE_PREFIX",
