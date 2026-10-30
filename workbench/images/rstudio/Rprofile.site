@@ -1,0 +1,92 @@
+
+# Connect to Snowflake as the user signed in to the Workbench portal (caller's rights).
+# Role is the one picked when the session was launched (WB_ROLE); override per call if needed.
+# Defaults come from the portal (install/config.env); empty values fall back to the user's defaults.
+sf_connect <- function(warehouse = Sys.getenv("WB_WAREHOUSE"), database = Sys.getenv("WB_DEFAULT_DATABASE"),
+                       schema = Sys.getenv("WB_DEFAULT_SCHEMA"), role = Sys.getenv("WB_ROLE")) {
+  if (!file.exists("/run/sf/token")) stop("No Snowflake token yet - reload the session tab in the browser.")
+  con <- DBI::dbConnect(odbc::odbc(),
+                        driver        = "/usr/lib/snowflake/odbc/lib/libSnowflake.so",
+                        server        = Sys.getenv("SNOWFLAKE_HOST"),
+                        account       = Sys.getenv("SNOWFLAKE_ACCOUNT"),
+                        authenticator = "oauth",
+                        token         = readLines("/run/sf/token", warn = FALSE),
+                        warehouse     = if (nzchar(warehouse)) warehouse else NULL,
+                        database      = if (nzchar(database)) database else NULL,
+                        schema        = if (nzchar(schema)) schema else NULL,
+                        role          = if (nzchar(role)) role else NULL)
+  # Audit trail: every query on this connection is tagged with the workbench session
+  # (see <app database>.WORKBENCH.SESSION_QUERY_HISTORY)
+  tag <- sprintf('{"app":"spcs-workbench","ide":"rstudio","session_id":"%s","owner":"%s","r_version":"%s"}',
+                 Sys.getenv("WB_SESSION_ID"), Sys.getenv("WB_OWNER"),
+                 paste(R.version$major, R.version$minor, sep = "."))
+  DBI::dbExecute(con, paste0("ALTER SESSION SET QUERY_TAG = '", tag, "'"))
+  con
+}
+
+# Packages come from the Workbench curated repository (portal > Packages). Public CRAN and
+# Bioconductor are not reachable from sessions; ask a Workbench admin to approve what you need.
+#   install.packages("data.table")                      default approved version
+#   install.packages("data.table", version = "1.15.0")  a specific approved version
+#   wb_versions("data.table")                           list approved versions for this R
+local({
+  repo <- Sys.getenv("WB_R_REPO")
+  if (!nzchar(repo)) return(invisible())
+  options(repos = c(Workbench = repo), BIOCONDUCTOR_ONLINE_VERSION_DIAGNOSIS = FALSE)
+  env <- new.env()
+
+  archived <- function() {
+    v <- tryCatch(utils::read.table(url(paste0(repo, "/archive/VERSIONS")), col.names = c("pkg", "version"),
+                                    colClasses = "character"),
+                  error = function(e) data.frame(pkg = character(), version = character()))
+    v
+  }
+  env$wb_versions <- function(pkg) {
+    avail <- tryCatch(utils::available.packages(), error = function(e) NULL)
+    default <- if (!is.null(avail) && pkg %in% rownames(avail)) avail[pkg, "Version"] else character()
+    a <- archived()
+    out <- unique(c(default, a$version[a$pkg == pkg]))
+    if (!length(out)) message(pkg, " is not approved for R ", getRversion(), ". Request it in the Workbench portal > Packages.")
+    if (length(default)) attr(out, "default") <- default
+    out
+  }
+  env$install.packages <- function(pkgs, ..., version = NULL) {
+    if (!is.null(version)) {
+      if (length(pkgs) != 1) stop("version= needs a single package")
+      avail <- utils::available.packages()
+      if (pkgs %in% rownames(avail) && avail[pkgs, "Version"] == version)
+        return(utils::install.packages(pkgs, ...))
+      a <- archived()
+      if (!any(a$pkg == pkgs & a$version == version)) {
+        have <- env$wb_versions(pkgs)
+        message("Version ", version, " of ", pkgs, " is not approved for R ", getRversion(), ".",
+                if (length(have)) paste0(" Approved: ", paste(have, collapse = ", "), ".") else "",
+                "\nRequest it in the Workbench portal > Packages.")
+        return(invisible())
+      }
+      f <- file.path(tempdir(), sprintf("%s_%s.tar.gz", pkgs, version))
+      utils::download.file(sprintf("%s/archive/%s_%s.tar.gz", repo, pkgs, version), f, quiet = TRUE, mode = "wb")
+      td <- tempfile("wbpkg")
+      utils::untar(f, files = file.path(pkgs, "DESCRIPTION"), exdir = td)
+      d <- read.dcf(file.path(td, pkgs, "DESCRIPTION"))
+      deps <- unlist(lapply(intersect(c("Depends", "Imports", "LinkingTo"), colnames(d)), function(k)
+        trimws(sub("\\(.*", "", strsplit(d[1, k], ",")[[1]]))))
+      deps <- setdiff(deps[nzchar(deps)], c("R", rownames(utils::installed.packages())))
+      if (length(deps)) utils::install.packages(deps, ...)
+      return(utils::install.packages(f, repos = NULL, ...))
+    }
+    if (!"repos" %in% names(list(...))) {
+      avail <- tryCatch(rownames(utils::available.packages()), error = function(e) character())
+      missing <- setdiff(pkgs, avail)
+      if (length(missing))
+        message("Not approved in the Workbench repository: ", paste(missing, collapse = ", "),
+                "\nRequest it in the Workbench portal > Packages.")
+      pkgs <- intersect(pkgs, avail)
+      if (!length(pkgs)) return(invisible())
+    }
+    utils::install.packages(pkgs, ...)
+  }
+  # Rprofile.site runs before utils is attached; attach after it so this masks utils::install.packages
+  setHook(packageEvent("utils", "attach"),
+          function(...) attach(env, name = "workbench:packages", warn.conflicts = FALSE))
+})

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workbench · Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/common.css">
+</head>
+<body>
+<header><h1>Snowflake Workbench</h1><nav id="nav"></nav><span class="user" id="user"></span></header>
+<main>
+  <div class="bar"><h2>Administration</h2></div>
+  <div id="ro" class="banner" hidden>Auditor access: read-only. Ask a Workbench admin to make changes.</div>
+  <div class="tabs">
+    <button data-tab="users" class="on">Users</button>
+    <button data-tab="sessions">All sessions</button>
+    <button data-tab="audit">Query audit</button>
+    <button data-tab="log">Admin log</button>
+    <button data-tab="settings">Settings</button>
+  </div>
+
+  <section id="tab-users">
+    <div class="card admin-only" style="margin-bottom:16px">
+      <div class="inline">
+        <select id="uType" style="width:110px"><option value="USER">User</option><option value="ROLE">Role / group</option></select>
+        <input type="text" id="uName" placeholder="Snowflake user or role name" style="flex:1">
+        <select id="uLevel" style="width:150px">
+          <option value="user">User</option><option value="auditor">Auditor (read-only)</option><option value="admin">Admin</option>
+        </select>
+        <button class="primary" id="uAdd">Grant</button>
+      </div>
+      <p class="note" style="margin-bottom:0">Grants the Snowflake role <code id="rUser">WORKBENCH_USER</code>, <code id="rAuditor">WORKBENCH_AUDITOR</code> or
+        <code id="rAdmin">WORKBENCH_ADMIN</code>. Granting to a role (e.g. one synced from your IdP) gives everyone in it that level.</p>
+    </div>
+    <div id="users"></div>
+  </section>
+
+  <section id="tab-sessions" hidden><div id="sessions"></div></section>
+
+  <section id="tab-audit" hidden>
+    <div class="inline" style="margin-bottom:14px">
+      <input type="text" id="aUser" placeholder="User" style="width:180px">
+      <input type="text" id="aSession" placeholder="Session ID" style="width:140px">
+      <input type="text" id="aQ" placeholder="Query text contains" style="flex:1">
+      <select id="aDays" style="width:120px"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="365">1 year</option><option value="3650">All</option></select>
+      <button class="primary" id="aGo">Search</button>
+      <button id="aRefresh" class="admin-only">Archive now</button>
+    </div>
+    <p class="note" style="margin-top:-6px">From the permanent archive <code>WORKBENCH.SESSION_QUERY_LOG</code> (hourly; Snowflake's account usage lags ~45 min).</p>
+    <div id="audit"></div>
+  </section>
+
+  <section id="tab-log" hidden><div id="log"></div></section>
+
+  <section id="tab-settings" hidden>
+    <div class="card">
+      <label>Snowflake roles users may pick for a session (none selected = any role they hold)</label>
+      <div id="sRoles" class="chips"></div>
+      <label for="sIdle">Auto-suspend idle sessions after (minutes)</label>
+      <input type="number" id="sIdle" min="15" max="10080" style="width:160px">
+      <label>Session sizes offered</label>
+      <div id="sSizes" class="chips"></div>
+      <div class="foot admin-only" style="justify-content:flex-start"><button class="primary" id="sSave">Save settings</button><span id="sMsg" class="meta"></span></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+let me;
+const admin = () => me.level === "admin";
+const loaders = {};
+
+for (const t of document.querySelectorAll(".tabs button")) t.onclick = () => {
+  for (const o of document.querySelectorAll(".tabs button")) o.classList.toggle("on", o === t);
+  for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== "tab-" + t.dataset.tab;
+  loaders[t.dataset.tab]();
+};
+
+loaders.users = async () => {
+  const rows = await api("GET", "/api/admin/users");
+  $("users").replaceChildren(tableOf(["Name", "Type", "Level", "Granted", ""], rows.map(g => {
+    const sel = el("select", { style: "width:150px", disabled: admin() ? undefined : "disabled" },
+      ...["user", "auditor", "admin"].map(l => el("option", { value: l }, l[0].toUpperCase() + l.slice(1))));
+    sel.value = g.level;
+    sel.onchange = async () => {
+      try { await api("POST", "/api/admin/users", { name: g.name, type: g.type, level: sel.value }); } catch (e) { alert(e.message); }
+      loaders.users();
+    };
+    return el("tr", {},
+      el("td", {}, el("div", { class: "ide" }, g.name)),
+      el("td", {}, g.type === "ROLE" ? pill("role", "role") : "user"),
+      el("td", {}, admin() ? sel : pill(g.level)),
+      el("td", {}, el("span", { class: "meta" }, (g.granted_by || "") + " " + when(g.granted_on))),
+      el("td", { class: "actions" }, admin() ? btn("Remove", async () => {
+        if (confirm(`Remove Workbench access for ${g.type.toLowerCase()} ${g.name}?`))
+          await api("POST", "/api/admin/users", { name: g.name, type: g.type, level: "none" });
+      }, "danger", false, loaders.users) : ""));
+  })));
+};
+$("uAdd").onclick = async () => {
+  const name = $("uName").value.trim();
+  if (!name) return;
+  try { await api("POST", "/api/admin/users", { name, type: $("uType").value, level: $("uLevel").value }); $("uName").value = ""; }
+  catch (e) { alert(e.message); }
+  loaders.users();
+};
+
+loaders.sessions = async () => {
+  const rows = await api("GET", "/api/admin/sessions");
+  if (!rows.length) { $("sessions").replaceChildren(el("div", { class: "empty" }, "No active sessions.")); return; }
+  const act = (s, a) => btn(a[0].toUpperCase() + a.slice(1), async () => {
+    if (a === "delete" && !confirm(`Delete ${s.owner}'s session "${s.name}"? Their ~/work files are kept.`)) return;
+    await api("POST", `/api/admin/sessions/${s.id}/${a}`);
+  }, a === "delete" ? "danger" : "", false, loaders.sessions);
+  $("sessions").replaceChildren(tableOf(["Owner", "Session", "IDE", "Role", "Size", "Status", "Last active", ""], rows.map(s => el("tr", {},
+    el("td", {}, s.owner),
+    el("td", {}, el("div", { class: "ide" }, s.name), el("span", { class: "meta" }, s.id)),
+    el("td", {}, s.type === "rstudio" ? "RStudio " + (s.r_version || "") : "JupyterLab"),
+    el("td", {}, pill(s.role || "default", "role")),
+    el("td", {}, pill(s.size, "size")),
+    el("td", {}, pill(s.status)),
+    el("td", {}, when(s.last_active)),
+    el("td", { class: "actions" }, ...(admin() ? [s.status === "SUSPENDED" ? act(s, "resume") : act(s, "suspend"), act(s, "delete")] : []))))));
+};
+
+loaders.audit = async () => {
+  const p = new URLSearchParams({ user: $("aUser").value.trim(), session: $("aSession").value.trim(), q: $("aQ").value.trim(), days: $("aDays").value });
+  $("audit").replaceChildren(el("div", { class: "empty" }, "Loading\u2026"));
+  const rows = await api("GET", "/api/admin/audit?" + p);
+  if (!rows.length) { $("audit").replaceChildren(el("div", { class: "empty" }, "No archived queries match.")); return; }
+  const objs = (a) => (a || []).filter(Boolean).join(", ");
+  $("audit").replaceChildren(tableOf(["Time", "User / session", "Role", "Type", "Rows", "Query", "Objects"], rows.map(r => el("tr", {},
+    el("td", {}, when(r.START_TIME)),
+    el("td", {}, r.SESSION_OWNER || "", el("span", { class: "meta" }, (r.SESSION_NAME || "") + " \u00b7 " + (r.SESSION_ID || ""))),
+    el("td", {}, r.ROLE_NAME || ""),
+    el("td", {}, pill(r.QUERY_TYPE, r.EXECUTION_STATUS === "SUCCESS" ? "RUNNING" : "FAILED")),
+    el("td", {}, String(r.ROWS_PRODUCED ?? "")),
+    el("td", {}, el("code", { style: "font-size:12px;white-space:pre-wrap" }, r.QUERY_TEXT), el("span", { class: "meta" }, r.QUERY_ID)),
+    el("td", { style: "font-size:12px" }, objs(r.OBJECTS_READ) ? el("div", {}, "read: " + objs(r.OBJECTS_READ)) : "",
+                                           objs(r.OBJECTS_WRITTEN) ? el("div", {}, "wrote: " + objs(r.OBJECTS_WRITTEN)) : "")))));
+};
+$("aGo").onclick = () => loaders.audit();
+$("aRefresh").onclick = async () => { try { alert((await api("POST", "/api/admin/audit/refresh")).note); } catch (e) { alert(e.message); } };
+
+loaders.log = async () => {
+  const rows = await api("GET", "/api/admin/actions");
+  if (!rows.length) { $("log").replaceChildren(el("div", { class: "empty" }, "No admin actions yet.")); return; }
+  $("log").replaceChildren(tableOf(["Time", "Admin", "Action", "Target", "Detail"], rows.map(r => el("tr", {},
+    el("td", {}, when(r.TS)), el("td", {}, r.ACTOR), el("td", {}, pill(r.ACTION, "size")), el("td", {}, r.TARGET),
+    el("td", {}, el("code", { style: "font-size:12px" }, JSON.stringify(r.DETAIL)))))));
+};
+
+loaders.settings = async () => {
+  const d = await api("GET", "/api/admin/settings");
+  const chk = (name, val, on) => el("label", { class: "pill size", style: "margin:0;cursor:pointer" },
+    el("input", { type: "checkbox", name, value: val, checked: on ? "checked" : undefined, disabled: admin() ? undefined : "disabled" }), " " + val);
+  $("sRoles").replaceChildren(...d.known_roles.map(r => chk("role", r, d.settings.allowed_session_roles.includes(r))));
+  $("sSizes").replaceChildren(...d.all_sizes.map(s => chk("size", s, d.settings.sizes.includes(s))));
+  $("sIdle").value = d.settings.idle_minutes;
+  $("sIdle").disabled = !admin();
+};
+$("sSave").onclick = async () => {
+  const vals = (n) => [...document.querySelectorAll(`input[name=${n}]:checked`)].map(i => i.value);
+  try {
+    await api("PUT", "/api/admin/settings", { allowed_session_roles: vals("role"), sizes: vals("size"), idle_minutes: Number($("sIdle").value) });
+    $("sMsg").textContent = "Saved.";
+  } catch (e) { $("sMsg").textContent = e.message; }
+};
+
+initHeader("/admin").then(m => {
+  if (m.level_roles) { $("rUser").textContent = m.level_roles.user; $("rAuditor").textContent = m.level_roles.auditor; $("rAdmin").textContent = m.level_roles.admin; }
+  me = m;
+  if (!admin()) { $("ro").hidden = false; for (const x of document.querySelectorAll(".admin-only")) x.hidden = true; }
+  loaders.users();
+});
+</script>
+</body>
+</html>

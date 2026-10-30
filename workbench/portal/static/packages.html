@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workbench · Packages</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/common.css">
+</head>
+<body>
+<header><h1>Snowflake Workbench</h1><nav id="nav"></nav><span class="user" id="user"></span></header>
+<main>
+  <div class="bar"><h2>Packages</h2><span id="syncState" class="meta"></span></div>
+  <p class="note" style="margin-top:-6px">Sessions install packages only from this curated repository.
+    <span id="howto"></span></p>
+  <div class="tabs">
+    <button data-tab="browse" class="on">Browse</button>
+    <button data-tab="curated">Approved &amp; requests <span id="reqCount"></span></button>
+    <button data-tab="included">Included in images</button>
+  </div>
+
+  <section id="tab-browse">
+    <div class="inline" style="margin-bottom:14px">
+      <select id="eco" style="width:170px">
+        <option value="cran">CRAN (R)</option><option value="bioc">Bioconductor (R)</option><option value="pypi">PyPI (Python)</option>
+      </select>
+      <input type="text" id="q" placeholder="Search package names, e.g. data.table" style="flex:1">
+      <button class="primary" id="go">Search</button>
+    </div>
+    <div class="grid2">
+      <div id="results"><div class="empty">Search CRAN, Bioconductor or PyPI.</div></div>
+      <div id="detail"></div>
+    </div>
+  </section>
+  <section id="tab-curated" hidden><div id="curated"></div></section>
+  <section id="tab-included" hidden>
+    <p class="note" style="margin-top:0">Preinstalled in every session image. Changing these needs an image rebuild (<code>build_images.sh</code>).</p>
+    <div id="included"></div>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const ECO = { cran: "CRAN", bioc: "Bioconductor", pypi: "PyPI" };
+let me, state;
+const isAdmin = () => me && me.level === "admin";
+
+function showTab(name) {
+  for (const o of document.querySelectorAll(".tabs button")) o.classList.toggle("on", o.dataset.tab === name);
+  for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== "tab-" + name;
+}
+for (const t of document.querySelectorAll(".tabs button")) t.onclick = () => { if (!drawer.hidden) closeDrawer(); showTab(t.dataset.tab); };
+// Browse shows details inline; the other tabs open the same card in a side panel over the list
+const drawer = el("div", { class: "drawer", hidden: true },
+  el("div", { class: "bar", style: "margin-bottom:8px" }, el("strong", {}, "Package details"), btn("Close", () => closeDrawer())));
+const shade = el("div", { class: "shade", hidden: true, onclick: () => closeDrawer() });
+document.body.append(shade, drawer);
+function closeDrawer() {
+  drawer.hidden = shade.hidden = true;
+  document.querySelector("#tab-browse .grid2").append($("detail"));
+  $("detail").replaceChildren(); delete $("detail").dataset.key;
+}
+const openDetails = (eco, name) => { drawer.append($("detail")); drawer.hidden = shade.hidden = false; show(eco, name); };
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !drawer.hidden) closeDrawer(); });
+
+async function load() {
+  state = await api("GET", "/api/packages");
+  const sync = state.sync;
+  $("syncState").textContent = sync.running ? "Syncing repository\u2026" :
+    (sync.last_error ? "Last sync failed: " + sync.last_error : (sync.last_at ? "Repository synced " + new Date(sync.last_at * 1000).toLocaleTimeString() : ""));
+  const reqs = state.packages.filter(p => p.status === "REQUESTED" || newVersionRequested(p)).length;
+  $("reqCount").textContent = reqs ? `(${reqs} pending)` : "";
+  $("included").replaceChildren(tableOf(["Package", "Repository", "Language", ""], state.included.map(p => el("tr", {},
+    el("td", {}, el("div", { class: "ide" }, p.name)), el("td", {}, ECO[p.ecosystem]),
+    el("td", {}, p.ecosystem === "pypi" ? "Python" : "R"),
+    el("td", { class: "actions" }, btn("Details", () => openDetails(p.ecosystem, p.name)))))));
+  renderCurated();
+}
+
+// Approved package where a user later asked for another version
+const newVersionRequested = p => p.status === "APPROVED" && p.requested_at && (!p.decided_at || p.requested_at > p.decided_at);
+
+function versionChips(p) {
+  return el("div", { class: "chips" }, ...p.versions.map(v => el("span", { class: "pill" }, v)));
+}
+
+function mirrorCell(p) {
+  if (p.status !== "APPROVED") return "";
+  const resolved = [], problems = [];
+  for (const [k, v] of Object.entries(p.mirror_detail || {})) {
+    if (v.startsWith("ok")) { const m = v.match(/^ok \((.+)\)$/); if (m) resolved.push(`${k.replace(/ latest$/, "")}: latest = ${m[1]}`); }
+    else problems.push(`${k}: ${v}`);
+  }
+  return el("div", {}, pill(p.mirror_status || "QUEUED"),
+    resolved.length ? el("span", { class: "meta" }, resolved.join("; ")) : "",
+    problems.length ? el("span", { class: "meta", style: "color:#a33" }, problems.join("; ")) : "");
+}
+
+function renderCurated() {
+  const rows = state.packages;
+  if (!rows.length) { $("curated").replaceChildren(el("div", { class: "empty" }, "Nothing approved or requested yet.")); return; }
+  $("curated").replaceChildren(tableOf(["Package", "Status", "Repository", "Requested", "Decided", ""], rows.map(p => el("tr", {},
+    el("td", {}, el("div", { class: "ide" }, p.name), el("span", { class: "meta" }, ECO[p.ecosystem]), versionChips(p)),
+    el("td", {}, pill(p.status), newVersionRequested(p) ? pill("REQUESTED") : "", p.note ? el("span", { class: "meta" }, p.note) : ""),
+    el("td", {}, mirrorCell(p)),
+    el("td", {}, p.requested_by || "", el("span", { class: "meta" }, when(p.requested_at))),
+    el("td", {}, p.decided_by || "", el("span", { class: "meta" }, when(p.decided_at))),
+    el("td", { class: "actions" }, btn("Details", () => openDetails(p.ecosystem, p.name)),
+      ...(isAdmin() ? decideButtons(p.ecosystem, p.name, p.status, () => p.version_spec || "") : []))))));
+}
+
+// spec(): comma-separated approved versions ("" = latest only)
+function decideButtons(eco, name, status, spec, approveLabel) {
+  const out = [];
+  const decide = async (st) => {
+    let note = "";
+    if (st === "DENIED") { note = prompt(`Reason for denying ${name}? (shown to users)`) ?? null; if (note === null) return; }
+    const version_spec = st === "APPROVED" && spec ? spec() : "";
+    if (version_spec === null) return;
+    await api("POST", "/api/packages/decide", { ecosystem: eco, name, status: st, note, version_spec });
+    await load(); if ($("detail").dataset.key === eco + ":" + name) show(eco, name);
+  };
+  if (status !== "APPROVED" || approveLabel) out.push(btn(approveLabel || "Approve", () => decide("APPROVED"), "ok"));
+  if (status !== "DENIED") out.push(btn("Deny", () => decide("DENIED"), "danger"));
+  if (status) out.push(btn("Clear", () => decide("REMOVE")));
+  return out;
+}
+
+async function search() {
+  const eco = $("eco").value, q = $("q").value.trim();
+  $("results").replaceChildren(el("div", { class: "empty" }, "Searching\u2026"));
+  let rows;
+  try { rows = await api("GET", `/api/packages/search?eco=${eco}&q=${encodeURIComponent(q)}`); }
+  catch (e) { $("results").replaceChildren(el("div", { class: "err" }, e.message)); return; }
+  if (!rows.length) { $("results").replaceChildren(el("div", { class: "empty" }, "No matches.")); return; }
+  $("results").replaceChildren(tableOf(["Package", "Status"], rows.map(r => el("tr", { class: "click", onclick: () => show(eco, r.name) },
+    el("td", {}, el("div", { class: "ide" }, r.name), el("span", { class: "meta" }, `${r.version || ""} \u00b7 ${r.title || ""}`)),
+    el("td", {}, r.status ? pill(r.status) : "")))));
+}
+$("go").onclick = search;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+
+async function show(eco, name) {
+  const d$ = $("detail");
+  d$.dataset.key = eco + ":" + name;
+  d$.replaceChildren(el("div", { class: "card" }, "Loading\u2026"));
+  let d;
+  try { d = await api("GET", `/api/packages/info?eco=${eco}&name=${encodeURIComponent(name)}`); }
+  catch (e) { d$.replaceChildren(el("div", { class: "card err" }, e.message)); return; }
+  const policy = state.packages.find(p => p.ecosystem === eco && p.name.toLowerCase() === name.toLowerCase());
+  const actions = el("div", { class: "foot", style: "justify-content:flex-start" });
+  const vbox = el("div", {}, el("span", { class: "meta" }, "Loading versions\u2026"));
+  const picked = new Set(policy ? policy.versions : ["latest"]);
+  let userPick = null;
+  const requestBtn = (label) => btn(label, async () => {
+    const version = userPick ? userPick.value : "latest";
+    const note = prompt(`Why do you need ${d.name}${version !== "latest" ? " " + version : ""}? (optional, for the admins)`);
+    if (note === null) return;
+    const r = await api("POST", "/api/packages/request", { ecosystem: eco, name: d.name, note, version });
+    if (r.status === "APPROVED" && !r.version_requested) alert(`${d.name} ${version} is already approved.`);
+    await load(); show(eco, name);
+  }, "primary");
+  if (d.status === "INCLUDED") {
+    actions.append(el("span", { class: "meta" }, "Preinstalled in session images."));
+  } else if (isAdmin()) {
+    const spec = () => {
+      const v = [...picked];
+      if (!v.length) { alert("Select at least one version (or Latest)."); return null; }
+      return v.join(",");
+    };
+    actions.append(...decideButtons(eco, d.name, d.status, spec, d.status === "APPROVED" ? "Save versions" : null));
+  } else if (!d.status) {
+    actions.append(requestBtn("Request approval"));
+  } else if (d.status === "APPROVED" && eco !== "bioc") {
+    actions.append(requestBtn("Request another version"));
+  } else if (d.status === "DENIED") {
+    actions.append(el("span", { class: "meta" }, "Denied" + (policy?.note ? ": " + policy.note : "") + ". Contact a Workbench admin."));
+  } else if (d.status === "REQUESTED") {
+    actions.append(el("span", { class: "meta" }, "Requested; waiting for an admin."));
+  }
+  const deps = d.depends.length ? el("div", { class: "chips" }, ...d.depends.map(x => el("span", { class: "pill " + (x.status || "") }, x.name))) : el("span", { class: "meta" }, "none");
+  d$.replaceChildren(el("div", { class: "card" },
+    el("div", { class: "bar", style: "margin-bottom:6px" }, el("h3", { style: "margin:0" }, d.name + " " + (d.version || "")), d.status ? pill(d.status) : ""),
+    el("div", { class: "meta" }, ECO[eco] + (d.license ? " \u00b7 " + d.license : "")),
+    el("p", {}, el("strong", {}, d.title || "")),
+    d.description && d.description !== d.title ? el("p", { style: "font-size:13px;color:#445" }, d.description) : "",
+    d.url ? el("p", { class: "meta" }, d.url.split(/[ ,]/)[0]) : "",
+    el("label", {}, "Dependencies (approved automatically with this package unless denied)"), deps,
+    d.sysreqs.length ? el("div", {}, el("label", {}, "System libraries required (Ubuntu)"),
+      el("div", { class: "banner" }, "Needs OS libraries: " + d.sysreqs.join(", ") + ". If they aren't in the session image, the package installs but fails to load; add them to images/rstudio/Dockerfile.")) : "",
+    d.status !== "INCLUDED" ? el("div", {}, el("label", {}, "Versions"), vbox) : "",
+    policy?.status === "APPROVED" ? el("div", {}, el("label", {}, "Repository"), mirrorCell(policy), installHint(eco, d.name, policy)) : "",
+    actions));
+  if (d.status === "INCLUDED") return;
+
+  let vs;
+  try { vs = await api("GET", `/api/packages/versions?eco=${eco}&name=${encodeURIComponent(name)}`); }
+  catch (e) { vbox.replaceChildren(el("span", { class: "err" }, e.message)); return; }
+  const targets = vs.versions.length ? Object.keys(vs.versions[0].targets) : [];
+  const approvedSet = new Set(policy?.status === "APPROVED" ? policy.versions : []);
+  const check = (v) => isAdmin() && vs.pinnable
+    ? el("input", { type: "checkbox", checked: picked.has(v), onchange: e => e.target.checked ? picked.add(v) : picked.delete(v) })
+    : (approvedSet.has(v) ? pill("APPROVED") : "");
+  const latestRow = el("tr", {}, el("td", {}, check("latest")),
+    el("td", {}, el("strong", {}, "Latest"), el("span", { class: "meta" }, " newest version in each image's package snapshot")),
+    el("td", {}), ...targets.map(() => el("td", { style: "text-align:center" }, "\u2713")));
+  const rows = vs.versions.map(r => el("tr", {},
+    el("td", {}, check(r.version)), el("td", {}, r.version), el("td", { class: "meta" }, r.published || ""),
+    ...targets.map(t => el("td", { style: "text-align:center", title: r.targets[t] ? "available" : "not available for this image" },
+      r.targets[t] ? "\u2713" : "\u2013"))));
+  const table = tableOf(["", "Version", "Published", ...targets], [latestRow, ...rows]);
+  const wrap = el("div", { style: "max-height:260px;overflow:auto" }, table);
+  const parts = [wrap];
+  if (!vs.pinnable) parts.unshift(el("p", { class: "meta" }, "Bioconductor versions are fixed by each R image's Bioconductor release (shown per image)."));
+  else if (isAdmin()) parts.unshift(el("p", { class: "meta" }, "Tick the versions users may install. With Latest ticked, the default install is the newest version in each image's snapshot; otherwise the highest ticked version."));
+  if (!isAdmin() && vs.pinnable && (!d.status || d.status === "APPROVED")) {
+    userPick = el("select", { style: "width:200px" }, el("option", { value: "latest" }, "Latest"),
+      ...vs.versions.map(r => el("option", { value: r.version }, r.version)));
+    parts.push(el("div", { class: "inline", style: "margin-top:8px" }, el("span", { class: "meta" }, "Version to request:"), userPick));
+  }
+  vbox.replaceChildren(...parts);
+}
+
+function installHint(eco, name, p) {
+  const pins = p.versions.filter(v => v !== "latest");
+  const ex = pins[0];
+  const code = eco === "pypi"
+    ? `pip install ${name}` + (ex ? `   # or: pip install ${name}==${ex.replace(/^[=<>!~]+/, "")}` : "")
+    : `install.packages("${name}")` + (ex ? `   # or: install.packages("${name}", version = "${ex}")` : "");
+  return el("div", { class: "meta", style: "margin-top:4px" }, el("code", {}, code));
+}
+
+initHeader("/packages").then(async m => {
+  me = m;
+  $("howto").replaceChildren(isAdmin() ? "Approve or deny packages and choose which versions are allowed; dependencies are mirrored automatically for every R version and Python 3.12."
+                                       : "Find a package and request it (optionally a specific version). In R: install.packages(\"pkg\") or install.packages(\"pkg\", version = \"x.y.z\"); in Python: pip install pkg==x.y.z.");
+  await load();
+  setInterval(load, 10000);
+});
+</script>
+</body>
+</html>

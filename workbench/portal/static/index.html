@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workbench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/common.css">
+</head>
+<body>
+<header><h1>Snowflake Workbench</h1><nav id="nav"></nav><span class="user" id="user"></span></header>
+<main>
+  <div class="bar"><h2>My sessions</h2><button class="primary" id="newBtn">+ New session</button></div>
+  <div id="list"></div>
+  <p class="note">Files in <code>~/work</code> are saved to your personal Snowflake stage and shared across all your sessions.
+    Suspended sessions stop billing compute; idle sessions auto-suspend. Packages install from the
+    <a href="/packages">curated repository</a>.</p>
+</main>
+
+<dialog id="dlg">
+  <h3>New session</h3>
+  <div class="types">
+    <label><input type="radio" name="type" value="rstudio" checked><div class="ide">RStudio</div><small>R + Bioconductor</small></label>
+    <label><input type="radio" name="type" value="jupyter"><div class="ide">JupyterLab</div><small>Python + Snowpark</small></label>
+  </div>
+  <label for="name">Name</label>
+  <input type="text" id="name" maxlength="60" placeholder="e.g. RNA-seq DE analysis">
+  <label for="size">Size</label>
+  <select id="size"></select>
+  <label for="role">Snowflake role for this session</label>
+  <select id="role"></select>
+  <div id="rverWrap">
+    <label for="rver">R version</label>
+    <select id="rver"></select>
+  </div>
+  <div class="row"><input type="checkbox" id="fast"><label for="fast">Add 20 GB fast scratch disk (<code>~/scratch</code>)</label></div>
+  <div class="err" id="err"></div>
+  <div class="foot"><button id="cancel">Cancel</button><button class="primary" id="create">Launch</button></div>
+</dialog>
+
+<dialog id="act" style="width:min(1000px,95vw)">
+  <h3 id="actTitle">Session activity</h3>
+  <p class="note" style="margin-top:0">Every query from <code>sf_connect()</code> is tagged with this session's ID
+    (<code>QUERY_TAG</code>) and archived permanently in <code>WORKBENCH.SESSION_QUERY_LOG</code>.</p>
+  <div id="actBody" style="max-height:60vh;overflow:auto"></div>
+  <div class="foot"><button id="actClose">Close</button></div>
+</dialog>
+
+<script src="/static/common.js"></script>
+<script>
+const IDE = { rstudio: "RStudio", jupyter: "JupyterLab" };
+const SIZE_LABEL = { small: "Small: 1 vCPU / 4 GB", medium: "Medium: 2 vCPU / 8 GB", large: "Large: 4 vCPU / 16 GB" };
+
+async function refresh() {
+  let rows;
+  try { rows = await api("GET", "/api/sessions"); } catch (e) { return; }
+  const list = $("list");
+  if (!rows.length) { list.replaceChildren(el("div", { class: "empty" }, "No sessions yet. Launch RStudio or JupyterLab to get started.")); return; }
+  list.replaceChildren(tableOf(["Session", "IDE", "Version", "Role", "Size", "Status", "Last active", ""], rows.map(s => {
+    const running = s.status === "RUNNING", suspended = s.status === "SUSPENDED";
+    return el("tr", {},
+      el("td", {}, el("div", { class: "ide" }, s.name)),
+      el("td", {}, IDE[s.type] || s.type),
+      el("td", {}, s.r_version ? pill("R " + s.r_version, "size") : el("span", { class: "meta" }, "\u2014")),
+      el("td", {}, pill(s.role || "default", "role")),
+      el("td", {}, pill(s.size, "size"), s.fast_disk ? pill("+ scratch", "disk") : ""),
+      el("td", {}, pill(s.status)),
+      el("td", {}, when(s.last_active)),
+      el("td", { class: "actions" },
+        btn("Activity", async () => showActivity(s)),
+        btn("Open", async () => window.open(`/s/${s.id}/`, "_blank"), "primary", !running),
+        suspended ? btn("Resume", () => api("POST", `/api/sessions/${s.id}/resume`), "", false, refresh)
+                  : btn("Suspend", () => api("POST", `/api/sessions/${s.id}/suspend`), "", !running, refresh),
+        btn("Delete", async () => { if (confirm(`Delete "${s.name}"? Files in ~/work are kept; ~/scratch is lost.`)) await api("DELETE", `/api/sessions/${s.id}`); }, "danger", false, refresh)));
+  })));
+}
+
+async function showActivity(s) {
+  $("actTitle").textContent = `Activity: ${s.name}`;
+  $("actBody").replaceChildren(el("div", { class: "empty" }, "Loading\u2026"));
+  $("act").showModal();
+  let rows;
+  try { rows = await api("GET", `/api/sessions/${s.id}/queries`); }
+  catch (e) { $("actBody").replaceChildren(el("div", { class: "err" }, e.message)); return; }
+  if (!rows.length) { $("actBody").replaceChildren(el("div", { class: "empty" }, "No queries from this session yet.")); return; }
+  $("actBody").replaceChildren(tableOf(["Time", "Role", "Type", "Rows", "Elapsed", "Query", "Query ID"], rows.map(r => el("tr", {},
+    el("td", {}, when(r.START_TIME)),
+    el("td", {}, r.ROLE_NAME || ""),
+    el("td", {}, pill(r.QUERY_TYPE, r.EXECUTION_STATUS === "SUCCESS" ? "RUNNING" : "FAILED")),
+    el("td", {}, String(r.ROWS_PRODUCED ?? "")),
+    el("td", {}, (r.TOTAL_ELAPSED_TIME / 1000).toFixed(1) + "s"),
+    el("td", {}, el("code", { style: "font-size:12px;white-space:pre-wrap" }, r.QUERY_TEXT)),
+    el("td", {}, el("small", { class: "meta" }, r.QUERY_ID))))));
+}
+$("actClose").onclick = () => $("act").close();
+
+$("newBtn").onclick = () => { $("err").textContent = ""; $("dlg").showModal(); };
+$("cancel").onclick = () => $("dlg").close();
+$("create").onclick = async () => {
+  const b = $("create"); b.disabled = true; $("err").textContent = "";
+  try {
+    await api("POST", "/api/sessions", {
+      type: document.querySelector("input[name=type]:checked").value,
+      name: $("name").value.trim(), size: $("size").value, fast_disk: $("fast").checked,
+      role: $("role").value, r_version: $("rver").value });
+    $("dlg").close(); $("name").value = "";
+  } catch (e) { $("err").textContent = e.message; }
+  b.disabled = false; refresh();
+};
+
+initHeader("/").then(me => {
+  for (const s of me.sizes) $("size").append(el("option", { value: s }, SIZE_LABEL[s] || s));
+  for (const role of me.roles) $("role").append(el("option", { value: role }, role));
+  if (!me.roles.length) $("role").append(el("option", { value: "" }, "Default role"));
+  if (me.default_role) $("role").value = me.default_role;
+  for (const v of me.r_versions) $("rver").append(el("option", { value: v }, "R " + v));
+  $("rver").value = me.default_r;
+});
+for (const radio of document.querySelectorAll("input[name=type]"))
+  radio.addEventListener("change", () => $("rverWrap").style.display = radio.value === "rstudio" && radio.checked ? "" : "none");
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

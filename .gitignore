@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.snowflake/
+.env
+*.p8
+
+# Local, account-specific configs
+/workbench/config.*.env
