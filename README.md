@@ -95,7 +95,7 @@ flowchart TB
 - **Identity:** Snowflake authentication only. The app has no user database of its own.
 - **Authorization:** two checks must both pass for a query to run. The **user's role** must allow it (normal Snowflake RBAC), and so must the app's **caller grants** (`GRANT CALLER ...`). Caller grants are the upper limit of what the app may do on a user's behalf, and you scope them with `DATA_DATABASES` in `config.env`. See [GRANT CALLER](https://docs.snowflake.com/en/sql-reference/sql/grant-caller).
 - **Data protection:** masking policies, row access policies and tags apply exactly as they do in Snowsight or any BI tool.
-- **Network:** sessions can reach only the portal and any hosts you list in `SESSION_EGRESS_HOSTS`. The portal can reach only the package sources (Posit Package Manager and PyPI) through an [external access integration](https://docs.snowflake.com/en/developer-guide/external-network-access/creating-using-external-network-access).
+- **Network:** sessions can reach only the portal and any hosts you list in `SESSION_EGRESS_HOSTS`. The portal can reach only the public package sources through an [external access integration](https://docs.snowflake.com/en/developer-guide/external-network-access/creating-using-external-network-access).
 - **Secrets:** none in images or user code. Sessions use short-lived tokens that SPCS provides.
 - **Least privilege:** the installer creates a dedicated owner role (`WORKBENCH_OWNER`). ACCOUNTADMIN is used only to run the install and is never the app's runtime role.
 - **Audit:** query history per session and user, plus a log of every admin action. Both are kept in Snowflake tables you control.
@@ -148,7 +148,7 @@ See [Snowpark Container Services costs](https://docs.snowflake.com/en/developer-
 
 ## Limitations
 
-- **IDEs:** RStudio and JupyterLab only. There's no VS Code or Positron.
+- **IDEs:** RStudio and JupyterLab only.
 - **Second sign-in:** each session has its own URL and needs one sign-in, which is silent with SSO. SPCS caller tokens are only valid in the service that received them.
 - **OS libraries:** R packages that need extra system libraries (for example `sf` needs GDAL) install but won't load until those libraries are added to the image.
 - **Bioconductor versions** are fixed per Bioconductor release, so they can't be pinned individually.

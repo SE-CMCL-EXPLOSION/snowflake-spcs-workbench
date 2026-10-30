@@ -1,7 +1,7 @@
 # Snowflake Workbench POC Guide
 
 **For:** data engineering teams (admins) and data scientists / researchers (users)
-**Covers:** how it works · Posit vs. Workbench · POC setup checklist · admin guide · data ingestion and storage · user guide
+**Covers:** how it works · POC setup checklist · admin guide · data ingestion and storage · user guide
 
 ---
 
@@ -47,30 +47,9 @@ What matters for security and governance:
 
 ---
 
-## 2. Posit Workbench vs. Snowflake Workbench
+## 2. POC setup checklist
 
-The user-facing experience is the same IDE in both: RStudio or JupyterLab in a browser. The differences are in how it's run and governed.
-
-| | Posit Workbench (Native App) | Snowflake Workbench (this app) |
-|---|---|---|
-| **Maturity / support** | Commercial product, vendor-supported, long track record | Built for this POC; you own the code (provided as a repository) |
-| **IDEs** | RStudio, JupyterLab, VS Code, Positron | RStudio (3 R versions), JupyterLab (Python 3.12) |
-| **Runs on** | Snowflake (Native App on SPCS) | Snowflake (SPCS in your account) |
-| **Sign-in** | Snowflake / SSO | Snowflake / SSO |
-| **Data access** | Via Snowflake connection | Caller's rights: the user's own roles, masking and row policies, automatically |
-| **Packages** | Posit Package Manager (separate product) | Built-in curated repository: users request, admins approve per version |
-| **Audit** | Posit and Snowflake logs | Every session query in a permanent Snowflake table, linked to user and session |
-| **Admin** | Posit admin tools plus SQL | Web Admin page (users, sessions, packages, settings) plus SQL |
-| **Customizing** | Through Posit's configuration | Full source code: images, packages and behaviour can be changed |
-| **Cost** | Posit license plus Snowflake compute | Snowflake compute only |
-
-**Suggested POC approach:** run both side by side for the same users, with the same roles and data. Give users both URLs and ask them to compare. Because data access is decided by Snowflake roles in both cases, users see exactly the same data in each. Only the tool experience differs.
-
----
-
-## 3. POC setup checklist
-
-Do these in order. Section 4 has the details for each step.
+Do these in order. Section 3 has the details for each step.
 
 | # | Step | Who | Done when |
 |---|---|---|---|
@@ -79,24 +58,24 @@ Do these in order. Section 4 has the details for each step.
 | 3 | Create the POC database and schemas (`RAW`, `CURATED`, `SANDBOX`) | Data Eng | Schemas exist |
 | 4 | Connect S3: storage integration and external stage | Data Eng + AWS admin | `LIST @stage` shows files |
 | 5 | Load or define the POC tables (projects, samples, results, with S3 pointers) | Data Eng | Tables queryable |
-| 6 | Create the researcher role and grant it the data | Data Eng | Section 4.3 checks pass |
+| 6 | Create the researcher role and grant it the data | Data Eng | Section 3.3 checks pass |
 | 7 | Give the researcher role Workbench access | Data Eng | Users see the portal |
 | 8 | Add the POC database to `DATA_DATABASES` (re-run installer with `--skip-images` if changed) | Data Eng | A test query from a session works |
 | 9 | Approve the R / Python packages users will need | Data Eng / CompBio lead | Packages show **READY** |
 | 10 | Document the data for users (comments, tags) | Data Eng | Tables have descriptions |
-| 11 | Smoke test as a researcher (Section 6) | Data Eng | Start a session, query, read an S3 file, write a result |
-| 12 | Share the portal URL (and the Posit URL) with users | PMO | Users invited |
+| 11 | Smoke test as a researcher (Section 5) | Data Eng | Start a session, query, read an S3 file, write a result |
+| 12 | Share the portal URL with users | PMO | Users invited |
 
 ---
 
-## 4. Admin guide
+## 3. Admin guide
 
-### 4.1 Access starts in Snowflake
+### 3.1 Access starts in Snowflake
 
 Everything a user can do is decided in Snowflake, not in the app:
 
 1. **The user exists in Snowflake.** Provision users from your identity provider (Okta, Entra ID…) with SAML for sign-in and, ideally, SCIM for provisioning. SCIM also creates your IdP groups as Snowflake roles automatically.
-2. **The user has a role that grants the data.** For example, `RESEARCH_POC_RESEARCHER` (Section 4.3).
+2. **The user has a role that grants the data.** For example, `RESEARCH_POC_RESEARCHER` (Section 3.3).
 3. **That role (or the user) has Workbench access.** `WORKBENCH_USER` is granted to it.
 
 The Workbench Admin page is just a convenient front end for step 3. Granting in SQL works the same:
@@ -116,7 +95,7 @@ GRANT ROLE WORKBENCH_USER TO USER JSMITH;                -- or one person
 
 These levels only control **the app**. They grant **no data**. A Workbench admin with no data roles sees no data.
 
-### 4.2 Why `DATA_DATABASES` exists (and why roles still decide)
+### 3.2 Why `DATA_DATABASES` exists (and why roles still decide)
 
 Sessions run with *restricted caller's rights*. A query only succeeds if **both** of these allow it:
 
@@ -133,7 +112,7 @@ Sessions run with *restricted caller's rights*. A query only succeeds if **both*
 
 So access is role-based; `DATA_DATABASES` stops the app from acting outside the POC data, even for a user who holds powerful roles. When you add a database, add it to `DATA_DATABASES` and run `./install.sh --skip-images`.
 
-### 4.3 Role design for the POC
+### 3.3 Role design for the POC
 
 One researcher role is enough for most POCs. Use the template below, then check it as a test user.
 
@@ -152,7 +131,7 @@ GRANT SELECT ON FUTURE TABLES IN SCHEMA RESEARCH_POC.CURATED TO ROLE RESEARCH_PO
 GRANT SELECT ON ALL VIEWS     IN SCHEMA RESEARCH_POC.CURATED TO ROLE RESEARCH_POC_RESEARCHER;
 GRANT SELECT ON FUTURE VIEWS  IN SCHEMA RESEARCH_POC.CURATED TO ROLE RESEARCH_POC_RESEARCHER;
 
--- Read S3 files through the stage (Section 5)
+-- Read S3 files through the stage (Section 4)
 GRANT USAGE ON STAGE RESEARCH_POC.RAW.S3_DATA TO ROLE RESEARCH_POC_RESEARCHER;
 GRANT USAGE ON SCHEMA RESEARCH_POC.RAW TO ROLE RESEARCH_POC_RESEARCHER;
 GRANT USAGE ON FILE FORMAT RESEARCH_POC.RAW.TSV_FF TO ROLE RESEARCH_POC_RESEARCHER;
@@ -182,7 +161,7 @@ SELECT COUNT(*) FROM RESEARCH_POC.CURATED.SAMPLES;   -- should work
 LIST @RESEARCH_POC.RAW.S3_DATA;                      -- should list files
 ```
 
-### 4.4 Running the Workbench day to day
+### 3.4 Running the Workbench day to day
 
 All of this is in the portal under **Admin** (admins can change things; auditors get a read-only view).
 
@@ -209,18 +188,18 @@ FROM <APP_DATABASE>.WORKBENCH.SESSION_QUERY_LOG
 ORDER BY START_TIME DESC;
 ```
 
-### 4.5 Network access (external access integrations)
+### 3.5 Network access (external access integrations)
 
 Two integrations control what reaches outside Snowflake:
 
 | Integration | Used by | Allows | Change it when |
 |---|---|---|---|
-| `<prefix>_PKG_EGRESS` | Portal only | Package sources (Posit Package Manager, PyPI) | Never needed for the POC |
+| `<prefix>_PKG_EGRESS` | Portal only | Public package sources (CRAN, Bioconductor, PyPI) | Never needed for the POC |
 | `<prefix>_SESSION_EGRESS` | User sessions | Only the hosts in `SESSION_EGRESS_HOSTS` | Users must call an outside service directly from code |
 
-For S3, use **an external stage** (Section 5), not session egress. It needs no AWS keys, and Snowflake roles control access. Only add hosts to `SESSION_EGRESS_HOSTS` for a real need, and **never** add package sites; that would bypass package approval.
+For S3, use **an external stage** (Section 4), not session egress. It needs no AWS keys, and Snowflake roles control access. Only add hosts to `SESSION_EGRESS_HOSTS` for a real need, and **never** add package sites; that would bypass package approval.
 
-### 4.6 Operations and cost
+### 3.6 Operations and cost
 
 | What runs | When it costs | How it's kept down |
 |---|---|---|
@@ -254,9 +233,9 @@ ALTER COMPUTE POOL <prefix>_PORTAL_POOL SUSPEND;
 
 ---
 
-## 5. Data ingestion and storage
+## 4. Data ingestion and storage
 
-### 5.1 The pattern for the POC
+### 4.1 The pattern for the POC
 
 You described a few tables (projects, samples, results) where some rows **point to large files in S3**. The recommended setup keeps those files in S3 and reads them through Snowflake:
 
@@ -303,7 +282,7 @@ JOIN DIRECTORY(@RESEARCH_POC.RAW.S3_DATA) d ON d.RELATIVE_PATH = s.FILE_PATH;
 
 **New files later:** run `ALTER STAGE ... REFRESH` after drops. For automatic updates, configure S3 event notifications to `AUTO_REFRESH` the directory table, or load continuously with Snowpipe.
 
-### 5.2 Where data can live
+### 4.2 Where data can live
 
 | Location | Use for | Who controls access |
 |---|---|---|
@@ -313,7 +292,7 @@ JOIN DIRECTORY(@RESEARCH_POC.RAW.S3_DATA) d ON d.RELATIVE_PATH = s.FILE_PATH;
 | `~/work` in a session | Scripts, notebooks, small files | Private to each user. Saved to the Workbench `USER_HOMES` stage, and shared by all of that user's sessions |
 | `~/scratch` (fast disk, optional) | Large temporary files during a session | Deleted with the session |
 
-### 5.3 What users can and can't do
+### 4.3 What users can and can't do
 
 | Users can | Because |
 |---|---|
@@ -325,12 +304,12 @@ JOIN DIRECTORY(@RESEARCH_POC.RAW.S3_DATA) d ON d.RELATIVE_PATH = s.FILE_PATH;
 | Users can't | Because |
 |---|---|
 | See data their role doesn't grant, or unmasked protected columns | RBAC, masking and row access policies |
-| Reach databases outside `DATA_DATABASES` from the app | The app's caller-grant limit (Section 4.2) |
+| Reach databases outside `DATA_DATABASES` from the app | The app's caller-grant limit (Section 3.2) |
 | Read S3 directly with AWS keys, or reach arbitrary internet hosts | Session egress allows only the listed hosts |
 | Install unapproved packages | No access to public package sites |
 | See other users' sessions or files | Sessions and `~/work` are per user |
 
-### 5.4 Helping users find data
+### 4.4 Helping users find data
 
 There's no separate catalog to maintain. Snowflake's catalog is the catalog:
 
@@ -345,13 +324,13 @@ There's no separate catalog to maintain. Snowflake's catalog is the catalog:
   ALTER TABLE RESEARCH_POC.CURATED.SAMPLES SET TAG RESEARCH_POC.CURATED.DOMAIN = 'samples';
   ```
 - **Users browse** in Snowsight (**Catalog** / search), or from code with `SHOW TABLES IN DATABASE RESEARCH_POC` and `INFORMATION_SCHEMA.TABLES`. Either way they only see objects their role can access.
-- **Requesting access:** Snowflake has no built-in request form, so agree a channel for the POC (an email alias, a ticket queue or a Slack channel) and put it in the user guide (Section 6.7). Package requests are built into the portal.
+- **Requesting access:** Snowflake has no built-in request form, so agree a channel for the POC (an email alias, a ticket queue or a Slack channel) and put it in the user guide (Section 5.7). Package requests are built into the portal.
 
 ---
 
-## 6. User guide
+## 5. User guide
 
-### 6.1 Sign in and start a session
+### 5.1 Sign in and start a session
 1. Open the **Workbench portal URL** your admin shared, and sign in with your normal Snowflake login.
 2. Click **New session** and choose:
    - **IDE:** RStudio or JupyterLab. For RStudio, also choose the R version.
@@ -361,7 +340,7 @@ There's no separate catalog to maintain. Snowflake's catalog is the catalog:
 
 Sessions suspend after a period of inactivity (4 hours by default). **Resume** restarts the session, and your `~/work` files are still there. **Delete** removes the session, but your files stay; they're shared by all your sessions.
 
-### 6.2 Connect to Snowflake
+### 5.2 Connect to Snowflake
 
 There are no passwords, keys or connection strings. You're already signed in.
 
@@ -388,11 +367,11 @@ session.table("RESEARCH_POC.CURATED.RESULTS").group_by("PROJECT_ID").count().sho
 
 Both accept `role=`, `database=`, `schema=` and `warehouse=` to override the defaults.
 
-### 6.3 Find data
+### 5.3 Find data
 - In code: `SHOW TABLES IN DATABASE RESEARCH_POC`, then `DESCRIBE TABLE ...` for columns and descriptions.
 - In Snowsight: open **Catalog** and search. You only see what your role can access.
 
-### 6.4 Work with S3 files
+### 5.4 Work with S3 files
 
 S3 files are reached through a **stage**. You don't need AWS credentials.
 
@@ -411,13 +390,13 @@ session = sf_session()
 session.file.get("@RESEARCH_POC.RAW.S3_DATA/expression/S0001.tsv", "/home/jovyan/scratch/")
 ```
 
-### 6.5 Save results
+### 5.5 Save results
 - **Share as a table:**
   - R: `DBI::dbWriteTable(con, DBI::Id(catalog = "RESEARCH_POC", schema = "SANDBOX", table = "MY_RESULTS"), df)`
   - Python: `session.write_pandas(df, "MY_RESULTS", database="RESEARCH_POC", schema="SANDBOX", auto_create_table=True)`
 - **Keep code and files:** save them under `~/work`. It persists and appears in all your sessions.
 
-### 6.6 Packages
+### 5.6 Packages
 - **R:**
   - `install.packages("pkg")` installs approved packages.
   - `install.packages("pkg", version = "1.2.3")` installs a specific approved version.
@@ -425,7 +404,7 @@ session.file.get("@RESEARCH_POC.RAW.S3_DATA/expression/S0001.tsv", "/home/jovyan
 - **Python:** `pip install pkg` or `pip install pkg==1.2.3`.
 - **Not approved yet?** Go to the portal > **Packages**, search, and click **Request**. You'll see the decision there.
 
-### 6.7 "Why can't I see…?"
+### 5.7 "Why can't I see…?"
 
 | You see | Likely reason | What to do |
 |---|---|---|

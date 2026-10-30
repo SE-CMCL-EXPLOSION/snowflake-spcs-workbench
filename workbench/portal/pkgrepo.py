@@ -31,7 +31,7 @@ log = logging.getLogger("pkgrepo")
 ROOT = Path(os.environ.get("WB_REPO_DIR", "/var/wb-repo"))
 P3M = "https://p3m.dev"
 
-# Session images: R version -> (Ubuntu codename, Posit snapshot the image was built from, Bioconductor)
+# Session images: R version -> (Ubuntu codename, CRAN snapshot the image was built from, Bioconductor)
 # Mirroring from the same snapshot keeps approved packages compatible with what's preinstalled.
 R_TARGETS = {
     "4.3.3": ("jammy", "2024-04-23", "3.18"),
@@ -105,7 +105,7 @@ def _json(url):
     return json.loads(_get(url))
 
 
-# ---------------------------------------------------------------- catalog (live, via Posit PM + PyPI)
+# ---------------------------------------------------------------- catalog (live, via the package APIs + PyPI)
 def _p3m_repo(eco):
     return {"cran": "cran", "bioc": "bioconductor", "pypi": "pypi"}[eco]
 
@@ -260,7 +260,7 @@ def sync_r(rver, approved, denied):
     arch = ROOT / "r" / rver / "archive"
     dest.mkdir(parents=True, exist_ok=True)
     arch.mkdir(parents=True, exist_ok=True)
-    ua = f"R ({rver} x86_64-pc-linux-gnu x86_64 linux-gnu)"   # Posit PM serves the matching binary
+    ua = f"R ({rver} x86_64-pc-linux-gnu x86_64 linux-gnu)"   # the server serves the matching binary
 
     def fetch(url, path):
         if path.exists():

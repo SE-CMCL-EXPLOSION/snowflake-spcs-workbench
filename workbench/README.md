@@ -130,13 +130,13 @@ The roles are hierarchical: ADMIN includes AUDITOR, which includes USER. You can
 
 ## Curated packages
 ```
-admin approves in portal ──> portal mirrors package + dependencies (Posit PM binaries / PyPI wheels)
+admin approves in portal ──> portal mirrors package + dependencies (R binaries / PyPI wheels)
                               into a local repo, persisted to @PKG_REPO
 sessions ──> http://portal:8081 (private endpoint) ──> install.packages() / pip install
 sessions ──X  CRAN / Bioconductor / PyPI (no egress to package hosts)
 ```
 - **Shop:** **Packages** searches CRAN, Bioconductor and PyPI, and shows each package's description, license, dependencies and any OS libraries it needs. Users click **Request**; admins click **Approve** or **Deny**, with an optional reason that users see.
-- **Mirroring:** approving a package mirrors it and its whole dependency tree for every R image, using the same dated Posit snapshot the image was built from, and for Python 3.12. If one of the package's dependencies is denied, the package shows as **blocked**.
+- **Mirroring:** approving a package mirrors it and its whole dependency tree for every R image, using the same dated CRAN snapshot the image was built from, and for Python 3.12. If one of the package's dependencies is denied, the package shows as **blocked**.
 - **Versions:** the package page lists every published version and which images it's available for. Admins tick the versions users may install; **Latest** means the newest version in each image's snapshot. Users can request a specific version.
   - R: `install.packages("pkg")` installs the default version: the snapshot version if Latest is approved, otherwise the highest approved version. `install.packages("pkg", version = "x.y.z")` installs any approved version, and `wb_versions("pkg")` lists them.
   - Python: every approved version is in the index, so use `pip install pkg==x.y.z`. Admins can also approve specifiers such as `>=2.0`.
@@ -148,14 +148,14 @@ sessions ──X  CRAN / Bioconductor / PyPI (no egress to package hosts)
   - Packages that need extra OS libraries (for example `sf` needs GDAL) install but won't load until those libraries are added to the image.
   - Dependencies of a pinned R version use the image snapshot's versions; a very old pin can need older dependencies than the snapshot has.
   - Denying a package stops new installs; copies users already installed in `~/work` stay.
-- **Portal egress** (`<prefix>_PKG_EGRESS`) allows: `p3m.dev`, `rspm-sync.rstudio.com` (Posit's binary CDN), `pypi.org` and `files.pythonhosted.org`.
+- **Portal egress** (`<prefix>_PKG_EGRESS`) allows: `p3m.dev`, `rspm-sync.rstudio.com` (binary CDN), `pypi.org` and `files.pythonhosted.org`.
 
 ## Customizing
 - **Names, data access, egress hosts, pool size:** `config.env`, then re-run `./install.sh` (add `--skip-images` if only settings changed).
 - **Session egress hosts** (`SESSION_EGRESS_HOSTS`): hosts that R/Python code may call directly, such as an S3 bucket. Don't add package hosts, or users can install anything.
 - **Runtime settings:** **Admin > Settings**: which roles users may pick per session, the idle timeout, and the sizes offered.
 - **Preinstalled packages:** edit `images/*/Dockerfile`, bump `IMAGE_TAG`, re-run `./install.sh`.
-- **New R version:** add it to `R_TARGETS` in `portal/pkgrepo.py` (Ubuntu codename, Posit snapshot date, Bioconductor release), to `R_VERSIONS` in `portal/app.py`, and to the R version loop in `install.sh`.
+- **New R version:** add it to `R_TARGETS` in `portal/pkgrepo.py` (Ubuntu codename, CRAN snapshot date, Bioconductor release), to `R_VERSIONS` in `portal/app.py`, and to the R version loop in `install.sh`.
 
 ## Notes
 - **Second sign-in:** opening a session goes to its own URL, which needs one sign-in (silent with SSO). This is required: SPCS caller tokens only work in the service that received them.

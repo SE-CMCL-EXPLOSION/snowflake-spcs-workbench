@@ -45,7 +45,7 @@ GRANT ROLE <% ACCESS_ROLE_PREFIX %>_ADMIN TO USER <% FIRST_ADMIN_IDENT %>;
 -- packages, and serves them to sessions internally.
 CREATE OR REPLACE NETWORK RULE <% APP_DATABASE %>.SPCS.<% OBJECT_PREFIX %>_PKG_RULE
   MODE = EGRESS TYPE = HOST_PORT
-  VALUE_LIST = ('p3m.dev:443', 'rspm-sync.rstudio.com:443', 'pypi.org:443', 'files.pythonhosted.org:443');  -- rspm-sync: Posit binary CDN
+  VALUE_LIST = ('p3m.dev:443', 'rspm-sync.rstudio.com:443', 'pypi.org:443', 'files.pythonhosted.org:443');  -- rspm-sync: binary CDN
 CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS <% OBJECT_PREFIX %>_PKG_EGRESS
   ALLOWED_NETWORK_RULES = (<% APP_DATABASE %>.SPCS.<% OBJECT_PREFIX %>_PKG_RULE) ENABLED = TRUE;
 GRANT USAGE ON INTEGRATION <% OBJECT_PREFIX %>_PKG_EGRESS TO ROLE <% OWNER_ROLE %>;
